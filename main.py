@@ -3,11 +3,33 @@ import time
 import os
 from flask import Flask
 import threading
+from web3 import Web3
 
-# 🔗 API precio
-URL = "https://api.dexscreener.com/latest/dex/pairs/bsc/0x7E4259eAAc5CA2Bc855C728e162d4d7782E52b7B"
+# 🔗 conexión BSC
+bsc = Web3(Web3.HTTPProvider("https://bsc-dataseed.binance.org/"))
 
-# 🔐 variables de entorno
+# 🔥 Router PancakeSwap V2
+router_address = Web3.to_checksum_address("0x10ED43C718714eb63d5aA57B78B54704E256024E")
+
+router_abi = [{
+    "name": "getAmountsOut",
+    "outputs": [{"type": "uint256[]"}],
+    "inputs": [
+        {"type": "uint256", "name": "amountIn"},
+        {"type": "address[]", "name": "path"}
+    ],
+    "stateMutability": "view",
+    "type": "function"
+}]
+
+router = bsc.eth.contract(address=router_address, abi=router_abi)
+
+# 🔥 TOKENS (los tuyos)
+TOKEN = Web3.to_checksum_address("0xec9742f992ACc615C4252060D896c845ca8fC086")
+USDT = Web3.to_checksum_address("0x55d398326f99059fF775485246999027B3197955")
+WBNB = Web3.to_checksum_address("0xBB4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c")
+
+# 🔐 variables entorno
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
@@ -41,23 +63,27 @@ def send_telegram(msg, chat_id=CHAT_ID):
     except Exception as e:
         print("Error Telegram:", e)
 
-# 💰 obtener precio
+# 💰 PRECIO REAL PANCAKESWAP
 def get_price():
     try:
-        r = requests.get(URL, timeout=10)
-        data = r.json()
+        amount_in = Web3.to_wei(1, 'ether')  # 1 TOKEN
 
-        if "pairs" in data and len(data["pairs"]) > 0:
-            return float(data["pairs"][0]["priceUsd"])
-        else:
-            print("⚠️ No hay datos en 'pairs'")
-            return None
+        # 🔥 ruta automática
+        try:
+            path = [TOKEN, USDT]
+            amounts = router.functions.getAmountsOut(amount_in, path).call()
+        except:
+            path = [TOKEN, WBNB, USDT]
+            amounts = router.functions.getAmountsOut(amount_in, path).call()
+
+        price = amounts[-1] / 1e18
+        return price
 
     except Exception as e:
-        print("Error precio:", e)
+        print("Error pancake:", e)
         return None
 
-# 🤖 leer mensajes (SIN DUPLICADOS)
+# 🤖 leer mensajes SIN duplicados
 def check_messages():
     global last_update_id, processed_updates
 
@@ -72,7 +98,6 @@ def check_messages():
         for update in response["result"]:
             update_id = update["update_id"]
 
-            # 🚫 evitar duplicados
             if update_id in processed_updates:
                 continue
 
@@ -89,9 +114,9 @@ def check_messages():
                 elif text == "/precio":
                     price = get_price()
                     if price is not None:
-                        send_telegram(f"💰 Precio actual: {price}", chat_id)
+                        send_telegram(f"💰 Precio real Pancake: {price}", chat_id)
                     else:
-                        send_telegram("⚠️ No se pudo obtener el precio", chat_id)
+                        send_telegram("⚠️ Error obteniendo precio", chat_id)
 
                 elif text == "/status":
                     send_telegram("✅ Bot corriendo correctamente", chat_id)
