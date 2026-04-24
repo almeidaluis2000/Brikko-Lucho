@@ -12,8 +12,8 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
 # ⚙️ configuración
-STEP_UP = 0.01
-STEP_DOWN = 0.01
+STEP_UP = 0.1
+STEP_DOWN = 0.1
 
 last_price = None
 
