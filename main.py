@@ -5,8 +5,8 @@ from flask import Flask
 import threading
 from web3 import Web3
 
-# 🔗 conexión BSC
-bsc = Web3(Web3.HTTPProvider("https://bsc-dataseed.binance.org/"))
+# 🔗 conexión BSC (más estable)
+bsc = Web3(Web3.HTTPProvider("https://bsc-dataseed1.binance.org/"))
 
 # 🔥 Router PancakeSwap
 router_address = Web3.to_checksum_address("0x10ED43C718714eb63d5aA57B78B54704E256024E")
@@ -63,26 +63,33 @@ def send_telegram(msg, chat_id=CHAT_ID):
     except Exception as e:
         print("Error Telegram:", e)
 
-# 💰 PRECIO REAL PANCAKE
+# 💰 PRECIO REAL PANCAKE (ROBUSTO)
 def get_price():
     try:
-        print("🔥 USANDO PANCAKESWAP REAL")
+        print("🔥 Calculando precio Pancake...")
 
         amount_in = Web3.to_wei(1, 'ether')
 
-        # intenta directo
-        try:
-            path = [TOKEN, USDT]
-            amounts = router.functions.getAmountsOut(amount_in, path).call()
-        except:
-            # fallback con WBNB
-            path = [TOKEN, WBNB, USDT]
-            amounts = router.functions.getAmountsOut(amount_in, path).call()
+        paths = [
+            [TOKEN, USDT],
+            [TOKEN, WBNB, USDT],
+            [TOKEN, WBNB]
+        ]
 
-        price = amounts[-1] / 1e18
+        for path in paths:
+            try:
+                amounts = router.functions.getAmountsOut(amount_in, path).call()
+                price = amounts[-1] / 1e18
 
-        print("💰 Precio Pancake:", price)
-        return price
+                print(f"✅ Ruta usada: {path}")
+                print(f"💰 Precio: {price}")
+
+                return price
+
+            except Exception:
+                print(f"❌ Ruta falló: {path}")
+
+        return None
 
     except Exception as e:
         print("❌ Error pancake:", e)
@@ -114,17 +121,17 @@ def check_messages():
                 text = update["message"].get("text", "")
 
                 if text == "/start":
-                    send_telegram("🤖 Bot activo (Pancake real)", chat_id)
+                    send_telegram("🤖 Bot activo (precio Pancake real)", chat_id)
 
                 elif text == "/precio":
                     price = get_price()
-                    if price:
-                        send_telegram(f"🔥 Precio REAL Pancake: {price}", chat_id)
+                    if price is not None:
+                        send_telegram(f"🔥 Precio real Pancake: {price}", chat_id)
                     else:
-                        send_telegram("⚠️ Error obteniendo precio", chat_id)
+                        send_telegram("⚠️ No se pudo calcular el precio", chat_id)
 
                 elif text == "/status":
-                    send_telegram("✅ Bot corriendo", chat_id)
+                    send_telegram("✅ Bot corriendo correctamente", chat_id)
 
                 else:
                     send_telegram("❓ Comando no reconocido", chat_id)
