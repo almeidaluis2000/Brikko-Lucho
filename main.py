@@ -5,7 +5,7 @@ from flask import Flask
 import threading
 from web3 import Web3
 
-# 🔗 conexión BSC (más estable)
+# 🔗 conexión BSC
 bsc = Web3(Web3.HTTPProvider("https://bsc-dataseed1.binance.org/"))
 
 # 🔥 Router PancakeSwap
@@ -68,27 +68,38 @@ def get_price():
     try:
         print("🔥 Calculando precio Pancake...")
 
-        amount_in = Web3.to_wei(1, 'ether')
+        # 🔁 probar distintos decimales
+        amounts_to_try = [
+            Web3.to_wei(1, 'ether'),  # 18 dec
+            10**9,
+            10**6
+        ]
 
+        # 🔁 rutas posibles
         paths = [
             [TOKEN, USDT],
             [TOKEN, WBNB, USDT],
             [TOKEN, WBNB]
         ]
 
-        for path in paths:
-            try:
-                amounts = router.functions.getAmountsOut(amount_in, path).call()
-                price = amounts[-1] / 1e18
+        for amount_in in amounts_to_try:
+            for path in paths:
+                try:
+                    amounts = router.functions.getAmountsOut(amount_in, path).call()
 
-                print(f"✅ Ruta usada: {path}")
-                print(f"💰 Precio: {price}")
+                    price = amounts[-1] / 1e18
 
-                return price
+                    print("✅ FUNCIONÓ")
+                    print("amount_in:", amount_in)
+                    print("path:", path)
+                    print("precio:", price)
 
-            except Exception:
-                print(f"❌ Ruta falló: {path}")
+                    return price
 
+                except:
+                    continue
+
+        print("❌ Ninguna ruta funcionó")
         return None
 
     except Exception as e:
@@ -121,7 +132,7 @@ def check_messages():
                 text = update["message"].get("text", "")
 
                 if text == "/start":
-                    send_telegram("🤖 Bot activo (precio Pancake real)", chat_id)
+                    send_telegram("🤖 Bot activo (Pancake real)", chat_id)
 
                 elif text == "/precio":
                     price = get_price()
