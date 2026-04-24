@@ -18,7 +18,7 @@ STEP_DOWN = 0.1
 last_price = None
 last_update_id = None
 
-# 🌐 servidor fake (Render)
+# 🌐 servidor fake (para Render)
 app = Flask(__name__)
 
 @app.route("/")
@@ -40,16 +40,23 @@ def send_telegram(msg, chat_id=CHAT_ID):
     except Exception as e:
         print("Error Telegram:", e)
 
-# 💰 obtener precio
+# 💰 obtener precio (CORREGIDO)
 def get_price():
     try:
         r = requests.get(URL, timeout=10)
         data = r.json()
-        return float(data["pair"]["priceUsd"])
-    except:
+
+        if "pair" in data and data["pair"] is not None:
+            return float(data["pair"]["priceUsd"])
+        else:
+            print("⚠️ Respuesta sin 'pair'")
+            return None
+
+    except Exception as e:
+        print("Error precio:", e)
         return None
 
-# 🤖 leer mensajes (COMANDOS)
+# 🤖 leer mensajes
 def check_messages():
     global last_update_id
 
@@ -74,7 +81,10 @@ def check_messages():
 
                 elif text == "/precio":
                     price = get_price()
-                    send_telegram(f"💰 Precio actual: {price}", chat_id)
+                    if price is not None:
+                        send_telegram(f"💰 Precio actual: {price}", chat_id)
+                    else:
+                        send_telegram("⚠️ No se pudo obtener el precio", chat_id)
 
                 elif text == "/status":
                     send_telegram("✅ Bot corriendo correctamente", chat_id)
@@ -92,7 +102,7 @@ def bot_loop():
 
     while True:
         try:
-            check_messages()  # 👈 responder comandos
+            check_messages()
 
             price = get_price()
 
