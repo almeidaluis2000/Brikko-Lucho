@@ -16,8 +16,9 @@ STEP_UP = 0.1
 STEP_DOWN = 0.1
 
 last_price = None
+last_update_id = None
 
-# 🌐 servidor fake para Render
+# 🌐 servidor fake (Render)
 app = Flask(__name__)
 
 @app.route("/")
@@ -29,11 +30,11 @@ def run_web():
     app.run(host="0.0.0.0", port=port)
 
 # 📲 enviar mensaje
-def send_telegram(msg):
+def send_telegram(msg, chat_id=CHAT_ID):
     try:
         requests.post(
             f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-            data={"chat_id": CHAT_ID, "text": msg},
+            data={"chat_id": chat_id, "text": msg},
             timeout=10
         )
     except Exception as e:
@@ -45,9 +46,44 @@ def get_price():
         r = requests.get(URL, timeout=10)
         data = r.json()
         return float(data["pair"]["priceUsd"])
-    except Exception as e:
-        print("Error precio:", e)
+    except:
         return None
+
+# 🤖 leer mensajes (COMANDOS)
+def check_messages():
+    global last_update_id
+
+    try:
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
+        response = requests.get(url, timeout=10).json()
+
+        for update in response["result"]:
+            update_id = update["update_id"]
+
+            if last_update_id is not None and update_id <= last_update_id:
+                continue
+
+            last_update_id = update_id
+
+            if "message" in update:
+                chat_id = update["message"]["chat"]["id"]
+                text = update["message"].get("text", "")
+
+                if text == "/start":
+                    send_telegram("🤖 Bot activo y funcionando", chat_id)
+
+                elif text == "/precio":
+                    price = get_price()
+                    send_telegram(f"💰 Precio actual: {price}", chat_id)
+
+                elif text == "/status":
+                    send_telegram("✅ Bot corriendo correctamente", chat_id)
+
+                else:
+                    send_telegram("❓ Comando no reconocido", chat_id)
+
+    except Exception as e:
+        print("Error leyendo mensajes:", e)
 
 # 🔁 loop principal
 def bot_loop():
@@ -56,6 +92,8 @@ def bot_loop():
 
     while True:
         try:
+            check_messages()  # 👈 responder comandos
+
             price = get_price()
 
             if price is None:
@@ -67,27 +105,20 @@ def bot_loop():
             if last_price is None:
                 last_price = price
 
-            level_up = last_price + STEP_UP
-            level_down = last_price - STEP_DOWN
-
-            if price >= level_up:
-                msg = f"🚀 SUBIÓ +{STEP_UP}\n💰 Precio: {price}"
-                print(msg)
-                send_telegram(msg)
+            if price >= last_price + STEP_UP:
+                send_telegram(f"🚀 SUBIÓ\n💰 {price}")
                 last_price = price
 
-            elif price <= level_down:
-                msg = f"📉 BAJÓ -{STEP_DOWN}\n💰 Precio: {price}"
-                print(msg)
-                send_telegram(msg)
+            elif price <= last_price - STEP_DOWN:
+                send_telegram(f"📉 BAJÓ\n💰 {price}")
                 last_price = price
 
-            time.sleep(5)  # 🔥 actualizado a 5 segundos
+            time.sleep(5)
 
         except Exception as e:
             print("🔥 ERROR:", e)
             time.sleep(15)
 
-# 🚀 correr bot + servidor
+# 🚀 correr todo
 threading.Thread(target=bot_loop).start()
 run_web()
