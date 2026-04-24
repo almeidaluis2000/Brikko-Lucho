@@ -8,7 +8,7 @@ from web3 import Web3
 # 🔗 conexión BSC
 bsc = Web3(Web3.HTTPProvider("https://bsc-dataseed.binance.org/"))
 
-# 🔥 Router PancakeSwap V2
+# 🔥 Router PancakeSwap
 router_address = Web3.to_checksum_address("0x10ED43C718714eb63d5aA57B78B54704E256024E")
 
 router_abi = [{
@@ -24,16 +24,16 @@ router_abi = [{
 
 router = bsc.eth.contract(address=router_address, abi=router_abi)
 
-# 🔥 TOKENS (los tuyos)
+# 🔥 TOKENS
 TOKEN = Web3.to_checksum_address("0xec9742f992ACc615C4252060D896c845ca8fC086")
 USDT = Web3.to_checksum_address("0x55d398326f99059fF775485246999027B3197955")
 WBNB = Web3.to_checksum_address("0xBB4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c")
 
-# 🔐 variables entorno
+# 🔐 TELEGRAM
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
-# ⚙️ configuración
+# ⚙️ CONFIG
 STEP_UP = 0.1
 STEP_DOWN = 0.1
 
@@ -41,7 +41,7 @@ last_price = None
 last_update_id = None
 processed_updates = set()
 
-# 🌐 servidor fake (Render)
+# 🌐 servidor fake
 app = Flask(__name__)
 
 @app.route("/")
@@ -52,7 +52,7 @@ def run_web():
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
 
-# 📲 enviar mensaje
+# 📲 TELEGRAM
 def send_telegram(msg, chat_id=CHAT_ID):
     try:
         requests.post(
@@ -63,27 +63,32 @@ def send_telegram(msg, chat_id=CHAT_ID):
     except Exception as e:
         print("Error Telegram:", e)
 
-# 💰 PRECIO REAL PANCAKESWAP
+# 💰 PRECIO REAL PANCAKE
 def get_price():
     try:
-        amount_in = Web3.to_wei(1, 'ether')  # 1 TOKEN
+        print("🔥 USANDO PANCAKESWAP REAL")
 
-        # 🔥 ruta automática
+        amount_in = Web3.to_wei(1, 'ether')
+
+        # intenta directo
         try:
             path = [TOKEN, USDT]
             amounts = router.functions.getAmountsOut(amount_in, path).call()
         except:
+            # fallback con WBNB
             path = [TOKEN, WBNB, USDT]
             amounts = router.functions.getAmountsOut(amount_in, path).call()
 
         price = amounts[-1] / 1e18
+
+        print("💰 Precio Pancake:", price)
         return price
 
     except Exception as e:
-        print("Error pancake:", e)
+        print("❌ Error pancake:", e)
         return None
 
-# 🤖 leer mensajes SIN duplicados
+# 🤖 TELEGRAM COMMANDS
 def check_messages():
     global last_update_id, processed_updates
 
@@ -109,17 +114,17 @@ def check_messages():
                 text = update["message"].get("text", "")
 
                 if text == "/start":
-                    send_telegram("🤖 Bot activo y funcionando", chat_id)
+                    send_telegram("🤖 Bot activo (Pancake real)", chat_id)
 
                 elif text == "/precio":
                     price = get_price()
-                    if price is not None:
-                        send_telegram(f"💰 Precio real Pancake: {price}", chat_id)
+                    if price:
+                        send_telegram(f"🔥 Precio REAL Pancake: {price}", chat_id)
                     else:
                         send_telegram("⚠️ Error obteniendo precio", chat_id)
 
                 elif text == "/status":
-                    send_telegram("✅ Bot corriendo correctamente", chat_id)
+                    send_telegram("✅ Bot corriendo", chat_id)
 
                 else:
                     send_telegram("❓ Comando no reconocido", chat_id)
@@ -127,7 +132,7 @@ def check_messages():
     except Exception as e:
         print("Error leyendo mensajes:", e)
 
-# 🔁 loop principal
+# 🔁 LOOP
 def bot_loop():
     global last_price
     print("🚀 Bot iniciado...")
@@ -141,8 +146,6 @@ def bot_loop():
             if price is None:
                 time.sleep(10)
                 continue
-
-            print("💰 Precio:", price)
 
             if last_price is None:
                 last_price = price
@@ -161,6 +164,6 @@ def bot_loop():
             print("🔥 ERROR:", e)
             time.sleep(15)
 
-# 🚀 correr todo
+# 🚀 RUN
 threading.Thread(target=bot_loop).start()
 run_web()
