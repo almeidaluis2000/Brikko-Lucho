@@ -40,37 +40,36 @@ def send_telegram(msg, chat_id=CHAT_ID):
     except Exception as e:
         print("Error Telegram:", e)
 
-# 💰 obtener precio (CORREGIDO)
+# 💰 obtener precio (FIX REAL)
 def get_price():
     try:
         r = requests.get(URL, timeout=10)
         data = r.json()
 
-        if "pair" in data and data["pair"] is not None:
-            return float(data["pair"]["priceUsd"])
+        if "pairs" in data and len(data["pairs"]) > 0:
+            return float(data["pairs"][0]["priceUsd"])
         else:
-            print("⚠️ Respuesta sin 'pair'")
+            print("⚠️ No hay datos en 'pairs'")
             return None
 
     except Exception as e:
         print("Error precio:", e)
         return None
 
-# 🤖 leer mensajes
+# 🤖 leer mensajes (SIN DUPLICADOS)
 def check_messages():
     global last_update_id
 
     try:
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
+
+        if last_update_id:
+            url += f"?offset={last_update_id + 1}"
+
         response = requests.get(url, timeout=10).json()
 
         for update in response["result"]:
-            update_id = update["update_id"]
-
-            if last_update_id is not None and update_id <= last_update_id:
-                continue
-
-            last_update_id = update_id
+            last_update_id = update["update_id"]
 
             if "message" in update:
                 chat_id = update["message"]["chat"]["id"]
