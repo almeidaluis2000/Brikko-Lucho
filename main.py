@@ -17,8 +17,9 @@ STEP_DOWN = 0.1
 
 last_price = None
 last_update_id = None
+processed_updates = set()
 
-# 🌐 servidor fake (para Render)
+# 🌐 servidor fake (Render)
 app = Flask(__name__)
 
 @app.route("/")
@@ -40,7 +41,7 @@ def send_telegram(msg, chat_id=CHAT_ID):
     except Exception as e:
         print("Error Telegram:", e)
 
-# 💰 obtener precio (FIX REAL)
+# 💰 obtener precio
 def get_price():
     try:
         r = requests.get(URL, timeout=10)
@@ -58,7 +59,7 @@ def get_price():
 
 # 🤖 leer mensajes (SIN DUPLICADOS)
 def check_messages():
-    global last_update_id
+    global last_update_id, processed_updates
 
     try:
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
@@ -69,7 +70,14 @@ def check_messages():
         response = requests.get(url, timeout=10).json()
 
         for update in response["result"]:
-            last_update_id = update["update_id"]
+            update_id = update["update_id"]
+
+            # 🚫 evitar duplicados
+            if update_id in processed_updates:
+                continue
+
+            processed_updates.add(update_id)
+            last_update_id = update_id
 
             if "message" in update:
                 chat_id = update["message"]["chat"]["id"]
