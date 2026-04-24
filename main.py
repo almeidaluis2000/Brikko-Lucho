@@ -8,26 +8,11 @@ from web3 import Web3
 # 🔗 conexión BSC
 bsc = Web3(Web3.HTTPProvider("https://bsc-dataseed1.binance.org/"))
 
-# 🔥 Router PancakeSwap
-router_address = Web3.to_checksum_address("0x10ED43C718714eb63d5aA57B78B54704E256024E")
-
-router_abi = [{
-    "name": "getAmountsOut",
-    "outputs": [{"type": "uint256[]"}],
-    "inputs": [
-        {"type": "uint256", "name": "amountIn"},
-        {"type": "address[]", "name": "path"}
-    ],
-    "stateMutability": "view",
-    "type": "function"
-}]
-
-router = bsc.eth.contract(address=router_address, abi=router_abi)
-
-# 🔥 TOKENS
+# 🔥 TU TOKEN
 TOKEN = Web3.to_checksum_address("0xec9742f992ACc615C4252060D896c845ca8fC086")
-USDT = Web3.to_checksum_address("0x55d398326f99059fF775485246999027B3197955")
-WBNB = Web3.to_checksum_address("0xBB4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c")
+
+# 🔥 TU POOL (LP)
+PAIR = Web3.to_checksum_address("0x7e4259eaac5ca2bc855c728e162d4d7782e52b7b")
 
 # 🔐 TELEGRAM
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -41,7 +26,7 @@ last_price = None
 last_update_id = None
 processed_updates = set()
 
-# 🌐 servidor fake
+# 🌐 servidor fake (Render)
 app = Flask(__name__)
 
 @app.route("/")
@@ -52,7 +37,7 @@ def run_web():
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
 
-# 📲 TELEGRAM
+# 📲 enviar mensaje
 def send_telegram(msg, chat_id=CHAT_ID):
     try:
         requests.post(
@@ -63,50 +48,64 @@ def send_telegram(msg, chat_id=CHAT_ID):
     except Exception as e:
         print("Error Telegram:", e)
 
-# 💰 PRECIO REAL PANCAKE (ROBUSTO)
+# 💰 PRECIO REAL DESDE POOL
 def get_price():
     try:
-        print("🔥 Calculando precio Pancake...")
+        print("🔥 Leyendo pool...")
 
-        # 🔁 probar distintos decimales
-        amounts_to_try = [
-            Web3.to_wei(1, 'ether'),  # 18 dec
-            10**9,
-            10**6
+        pair_abi = [
+            {
+                "name": "getReserves",
+                "outputs": [
+                    {"type": "uint112"},
+                    {"type": "uint112"},
+                    {"type": "uint32"}
+                ],
+                "inputs": [],
+                "stateMutability": "view",
+                "type": "function"
+            },
+            {
+                "name": "token0",
+                "outputs": [{"type": "address"}],
+                "inputs": [],
+                "stateMutability": "view",
+                "type": "function"
+            },
+            {
+                "name": "token1",
+                "outputs": [{"type": "address"}],
+                "inputs": [],
+                "stateMutability": "view",
+                "type": "function"
+            }
         ]
 
-        # 🔁 rutas posibles
-        paths = [
-            [TOKEN, USDT],
-            [TOKEN, WBNB, USDT],
-            [TOKEN, WBNB]
-        ]
+        pair = bsc.eth.contract(address=PAIR, abi=pair_abi)
 
-        for amount_in in amounts_to_try:
-            for path in paths:
-                try:
-                    amounts = router.functions.getAmountsOut(amount_in, path).call()
+        reserves = pair.functions.getReserves().call()
+        token0 = pair.functions.token0().call()
+        token1 = pair.functions.token1().call()
 
-                    price = amounts[-1] / 1e18
+        reserve0 = reserves[0]
+        reserve1 = reserves[1]
 
-                    print("✅ FUNCIONÓ")
-                    print("amount_in:", amount_in)
-                    print("path:", path)
-                    print("precio:", price)
+        print("Reserves:", reserve0, reserve1)
 
-                    return price
+        # calcular precio
+        if token0.lower() == TOKEN.lower():
+            price = reserve1 / reserve0
+        else:
+            price = reserve0 / reserve1
 
-                except:
-                    continue
-
-        print("❌ Ninguna ruta funcionó")
-        return None
+        print("💰 Precio pool:", price)
+        return price
 
     except Exception as e:
-        print("❌ Error pancake:", e)
+        print("❌ Error pool:", e)
         return None
 
-# 🤖 TELEGRAM COMMANDS
+# 🤖 comandos Telegram
 def check_messages():
     global last_update_id, processed_updates
 
@@ -132,14 +131,14 @@ def check_messages():
                 text = update["message"].get("text", "")
 
                 if text == "/start":
-                    send_telegram("🤖 Bot activo (Pancake real)", chat_id)
+                    send_telegram("🤖 Bot activo (precio real pool)", chat_id)
 
                 elif text == "/precio":
                     price = get_price()
                     if price is not None:
-                        send_telegram(f"🔥 Precio real Pancake: {price}", chat_id)
+                        send_telegram(f"💰 Precio real: {price}", chat_id)
                     else:
-                        send_telegram("⚠️ No se pudo calcular el precio", chat_id)
+                        send_telegram("⚠️ Error obteniendo precio", chat_id)
 
                 elif text == "/status":
                     send_telegram("✅ Bot corriendo correctamente", chat_id)
@@ -148,9 +147,9 @@ def check_messages():
                     send_telegram("❓ Comando no reconocido", chat_id)
 
     except Exception as e:
-        print("Error leyendo mensajes:", e)
+        print("Error mensajes:", e)
 
-# 🔁 LOOP
+# 🔁 loop principal
 def bot_loop():
     global last_price
     print("🚀 Bot iniciado...")
@@ -182,6 +181,6 @@ def bot_loop():
             print("🔥 ERROR:", e)
             time.sleep(15)
 
-# 🚀 RUN
+# 🚀 ejecutar
 threading.Thread(target=bot_loop).start()
 run_web()
