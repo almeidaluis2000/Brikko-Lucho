@@ -17,7 +17,7 @@ TOKEN_IN = Web3.to_checksum_address("0xec9742f992ACc615C4252060D896c845ca8fC086"
 TOKEN_OUT = Web3.to_checksum_address("0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c")  # WBNB
 
 # PancakeSwap V3 Quoter (BSC)
-QUOTER = Web3.to_checksum_address("0x78D78E420Da98ad378D7799bE8f4AF69033EB077")
+QUOTER = Web3.to_checksum_address("0x7e4259eaac5ca2bc855c728e162d4d7782e52b7b")
 
 FEE = 3000  # 0.3% (ajusta si tu pool es otro: 500 / 3000 / 10000)
 
