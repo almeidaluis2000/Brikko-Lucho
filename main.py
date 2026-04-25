@@ -11,18 +11,16 @@ from web3 import Web3
 bsc = Web3(Web3.HTTPProvider("https://bsc-dataseed1.binance.org/"))
 
 # =========================
-# 🔥 CONFIG
+# 🔥 TOKENS (TU LINK)
 # =========================
 TOKEN_IN = Web3.to_checksum_address("0xec9742f992ACc615C4252060D896c845ca8fC086")
-TOKEN_OUT = Web3.to_checksum_address("0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c")
+TOKEN_OUT = Web3.to_checksum_address("0x55d398326f99059fF775485246999027B3197955")  # USDT
 
+# PancakeSwap V3 Quoter (BSC oficial)
 QUOTER = Web3.to_checksum_address("0x78D78E420Da98ad378D7799bE8f4AF69033EB077")
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
-
-STEP_UP = 0.1
-STEP_DOWN = 0.1
 
 # =========================
 # 🌐 FLASK
@@ -31,7 +29,7 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return "V3 AutoFee Bot activo"
+    return "V3 swap bot activo"
 
 def run_web():
     port = int(os.environ.get("PORT", 10000))
@@ -77,11 +75,10 @@ quoter_abi = [
 quoter = bsc.eth.contract(address=QUOTER, abi=quoter_abi)
 
 # =========================
-# 💥 AUTO FEE DETECTION (CLAVE)
+# 💥 AUTO FEE INTELIGENTE
 # =========================
-FEE_CACHE = None
-
 FEES = [500, 3000, 10000]
+FEE_CACHE = None
 
 def detect_fee():
     global FEE_CACHE
@@ -89,9 +86,7 @@ def detect_fee():
     if FEE_CACHE:
         return FEE_CACHE
 
-    amount_in = 10**18  # 1 token base
-
-    print("🔍 Detectando fee V3...")
+    amount_in = 10**18
 
     for fee in FEES:
         try:
@@ -108,44 +103,40 @@ def detect_fee():
                 print(f"✅ Fee detectado: {fee}")
                 return fee
 
-        except Exception as e:
-            print(f"❌ fee {fee} failed:", repr(e))
+        except Exception:
             continue
 
-    print("❌ No se pudo detectar fee")
     return None
 
 # =========================
-# 💰 PRECIO REAL SWAP V3
+# 💰 PRECIO REAL SWAP
 # =========================
 def get_price():
-    # 1. intentar V3
     try:
-        fee = 3000
-        out = quoter.functions.quoteExactInputSingle(
+        fee = detect_fee()
+
+        if not fee:
+            return None
+
+        amount_in = 10**18
+
+        amount_out = quoter.functions.quoteExactInputSingle(
             TOKEN_IN,
             TOKEN_OUT,
             fee,
-            10**18,
+            amount_in,
             0
         ).call()
 
-        return out / 10**18
+        price = amount_out / amount_in
+        return price
 
-    except:
-        pass
-
-    # 2. fallback DexScreener
-    try:
-        url = f"https://api.dexscreener.com/latest/dex/pairs/bsc/{PAIR}"
-        data = session.get(url).json()
-        return float(data["pair"]["priceUsd"])
-
-    except:
+    except Exception as e:
+        print("❌ PRICE ERROR:", repr(e))
         return None
 
 # =========================
-# 🤖 TELEGRAM LOOP
+# 🤖 LOOP TELEGRAM
 # =========================
 last_update_id = 0
 
@@ -170,52 +161,26 @@ def check_messages():
             chat_id = msg["chat"]["id"]
             text = msg.get("text", "")
 
-            if text == "/start":
-                send_telegram("🤖 V3 AutoFee Bot activo", chat_id)
-
-            elif text == "/precio":
+            if text == "/precio":
                 price = get_price()
-                if price:
-                    send_telegram(f"💰 Swap V3: {price:.8f}\n🔥 Fee: {FEE_CACHE}", chat_id)
-                else:
-                    send_telegram("❌ Error obteniendo precio", chat_id)
 
-            elif text == "/status":
-                send_telegram("✅ Bot OK", chat_id)
+                if price:
+                    send_telegram(f"💰 PRECIO REAL SWAP V3:\n{price:.6f} USDT", chat_id)
+                else:
+                    send_telegram("❌ No se pudo obtener precio (pool sin ruta directa)", chat_id)
 
     except Exception as e:
         print("Telegram error:", repr(e))
 
 # =========================
-# 🔁 LOOP PRINCIPAL
+# 🔁 LOOP
 # =========================
-last_price = None
-
 def bot_loop():
-    global last_price
-
-    print("🚀 V3 AutoFee Bot iniciado")
+    print("🚀 Bot V3 real iniciado")
 
     while True:
         try:
             check_messages()
-
-            price = get_price()
-            if price is None:
-                time.sleep(5)
-                continue
-
-            if last_price is None:
-                last_price = price
-
-            if price >= last_price + STEP_UP:
-                send_telegram(f"🚀 SUBIÓ\n💰 {price}")
-                last_price = price
-
-            elif price <= last_price - STEP_DOWN:
-                send_telegram(f"📉 BAJÓ\n💰 {price}")
-                last_price = price
-
             time.sleep(5)
 
         except Exception as e:
