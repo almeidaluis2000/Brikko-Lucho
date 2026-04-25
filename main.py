@@ -24,7 +24,7 @@ def safe_get_env(name):
 BOT_TOKEN = safe_get_env("BOT_TOKEN")
 CHAT_ID = safe_get_env("CHAT_ID")
 
-POOL = Web3.to_checksum_address("0x7E4259eAAc5CA2Bc855C728e162d4d7782E52b7Bec")
+POOL = Web3.to_checksum_address("0x7E4259eAAc5CA2Bc855C728e162d4d7782E52b7B")
 
 abi = [
     {
