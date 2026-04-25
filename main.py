@@ -6,18 +6,18 @@ from flask import Flask
 from web3 import Web3
 
 # =========================
-# 🔗 RPC
+# 🔗 BSC
 # =========================
 bsc = Web3(Web3.HTTPProvider("https://bsc-dataseed1.binance.org/"))
 
 # =========================
-# 🔥 TOKENS (TU LINK)
+# 🔥 TOKENS
 # =========================
 TOKEN_IN = Web3.to_checksum_address("0xec9742f992ACc615C4252060D896c845ca8fC086")
-TOKEN_OUT = Web3.to_checksum_address("0x55d398326f99059fF775485246999027B3197955")  # USDT
+TOKEN_OUT = Web3.to_checksum_address("0x55d398326f99059fF775485246999027B3197955")
 
-# PancakeSwap V3 Quoter (BSC oficial)
-QUOTER = Web3.to_checksum_address("0x78D78E420Da98ad378D7799bE8f4AF69033EB077")
+# PancakeSwap V3 Router (NO QUOTER)
+ROUTER = Web3.to_checksum_address("0x10ED43C718714eb63d5aA57B78B54704E256024E")
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
@@ -29,15 +29,12 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return "V3 swap bot activo"
+    return "Router bot activo"
 
 def run_web():
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
 
-# =========================
-# 🌐 SESSION
-# =========================
 session = requests.Session()
 
 # =========================
@@ -54,89 +51,46 @@ def send_telegram(msg, chat_id=CHAT_ID):
         print("Telegram error:", repr(e))
 
 # =========================
-# 📡 QUOTER ABI
+# 📡 ABI MINIMAL ROUTER
 # =========================
-quoter_abi = [
+router_abi = [
     {
-        "name": "quoteExactInputSingle",
+        "name": "getAmountsOut",
         "type": "function",
         "stateMutability": "view",
         "inputs": [
-            {"type": "address"},
-            {"type": "address"},
-            {"type": "uint24"},
             {"type": "uint256"},
-            {"type": "uint160"}
+            {"type": "address[]"}
         ],
-        "outputs": [{"type": "uint256"}]
+        "outputs": [{"type": "uint256[]"}]
     }
 ]
 
-quoter = bsc.eth.contract(address=QUOTER, abi=quoter_abi)
+router = bsc.eth.contract(address=ROUTER, abi=router_abi)
 
 # =========================
-# 💥 AUTO FEE INTELIGENTE
-# =========================
-FEES = [500, 3000, 10000]
-FEE_CACHE = None
-
-def detect_fee():
-    global FEE_CACHE
-
-    if FEE_CACHE:
-        return FEE_CACHE
-
-    amount_in = 10**18
-
-    for fee in FEES:
-        try:
-            out = quoter.functions.quoteExactInputSingle(
-                TOKEN_IN,
-                TOKEN_OUT,
-                fee,
-                amount_in,
-                0
-            ).call()
-
-            if out > 0:
-                FEE_CACHE = fee
-                print(f"✅ Fee detectado: {fee}")
-                return fee
-
-        except Exception:
-            continue
-
-    return None
-
-# =========================
-# 💰 PRECIO REAL SWAP
+# 💰 PRECIO REAL (MULTI-HOP REAL)
 # =========================
 def get_price():
     try:
-        fee = detect_fee()
-
-        if not fee:
-            return None
-
         amount_in = 10**18
 
-        amount_out = quoter.functions.quoteExactInputSingle(
+        path = [
             TOKEN_IN,
-            TOKEN_OUT,
-            fee,
-            amount_in,
-            0
-        ).call()
+            TOKEN_OUT
+        ]
 
-        price = amount_out / amount_in
+        amounts = router.functions.getAmountsOut(amount_in, path).call()
+
+        price = amounts[-1] / amount_in
         return price
 
     except Exception as e:
-        print("❌ PRICE ERROR:", repr(e))
+        print("❌ ROUTE ERROR:", repr(e))
         return None
 
 # =========================
-# 🤖 LOOP TELEGRAM
+# 🤖 TELEGRAM LOOP
 # =========================
 last_update_id = 0
 
@@ -165,9 +119,9 @@ def check_messages():
                 price = get_price()
 
                 if price:
-                    send_telegram(f"💰 PRECIO REAL SWAP V3:\n{price:.6f} USDT", chat_id)
+                    send_telegram(f"💰 PRECIO REAL (ROUTER):\n{price:.6f} USDT", chat_id)
                 else:
-                    send_telegram("❌ No se pudo obtener precio (pool sin ruta directa)", chat_id)
+                    send_telegram("❌ No hay ruta disponible", chat_id)
 
     except Exception as e:
         print("Telegram error:", repr(e))
@@ -176,7 +130,7 @@ def check_messages():
 # 🔁 LOOP
 # =========================
 def bot_loop():
-    print("🚀 Bot V3 real iniciado")
+    print("🚀 Router bot iniciado")
 
     while True:
         try:
