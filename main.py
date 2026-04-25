@@ -6,32 +6,20 @@ from flask import Flask
 from web3 import Web3
 
 # =========================
-# 🔗 RPC BSC (fallback)
+# 🔗 RPC BSC
 # =========================
-RPCS = [
-    "https://bsc-dataseed1.binance.org/",
-    "https://bsc-dataseed2.defibit.io/",
-    "https://bsc-dataseed3.defibit.io/"
-]
-
-bsc = None
-for rpc in RPCS:
-    w3 = Web3(Web3.HTTPProvider(rpc))
-    if w3.is_connected():
-        bsc = w3
-        print("✅ RPC conectado:", rpc)
-        break
-
-if not bsc:
-    raise Exception("No RPC available")
+bsc = Web3(Web3.HTTPProvider("https://bsc-dataseed1.binance.org/"))
 
 # =========================
 # 🔥 CONFIG
 # =========================
 TOKEN_IN = Web3.to_checksum_address("0xec9742f992ACc615C4252060D896c845ca8fC086")
-TOKEN_OUT = Web3.to_checksum_address("0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c")  # WBNB ejemplo
+TOKEN_OUT = Web3.to_checksum_address("0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c")  # WBNB
 
-POOL = Web3.to_checksum_address("0x7e4259eaac5ca2bc855c728e162d4d7782e52b7b")
+# PancakeSwap V3 Quoter (BSC)
+QUOTER = Web3.to_checksum_address("0x78D78E420Da98ad378D7799bE8f4AF69033EB077")
+
+FEE = 3000  # 0.3% (ajusta si tu pool es otro: 500 / 3000 / 10000)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
@@ -46,7 +34,7 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return "V3 Bot activo"
+    return "Quoter V3 Bot activo"
 
 def run_web():
     port = int(os.environ.get("PORT", 10000))
@@ -71,71 +59,44 @@ def send_telegram(msg, chat_id=CHAT_ID):
         print("Telegram error:", e)
 
 # =========================
-# 📡 V3 POOL ABI (slot0)
+# 📡 QUOTER ABI
 # =========================
-pool_abi = [
+quoter_abi = [
     {
-        "name": "slot0",
-        "outputs": [
-            {"type": "uint160"},
-            {"type": "int24"},
-            {"type": "uint16"},
-            {"type": "uint16"},
-            {"type": "uint16"},
-            {"type": "uint8"},
-            {"type": "bool"}
+        "name": "quoteExactInputSingle",
+        "type": "function",
+        "stateMutability": "view",
+        "inputs": [
+            {"name": "tokenIn", "type": "address"},
+            {"name": "tokenOut", "type": "address"},
+            {"name": "fee", "type": "uint24"},
+            {"name": "amountIn", "type": "uint256"},
+            {"name": "sqrtPriceLimitX96", "type": "uint160"}
         ],
-        "inputs": [],
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "name": "token0",
-        "outputs": [{"type": "address"}],
-        "inputs": [],
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "name": "token1",
-        "outputs": [{"type": "address"}],
-        "inputs": [],
-        "stateMutability": "view",
-        "type": "function"
+        "outputs": [{"name": "amountOut", "type": "uint256"}]
     }
 ]
 
-pool = bsc.eth.contract(address=POOL, abi=pool_abi)
+quoter = bsc.eth.contract(address=QUOTER, abi=quoter_abi)
 
 # =========================
-# 💰 PRICE V3 (CORRECTO)
+# 💰 REAL SWAP PRICE (QUOTER)
 # =========================
-def get_price():
+def get_price(amount_in=10**18):
     try:
-        slot0 = pool.functions.slot0().call()
-        sqrtPriceX96 = slot0[0]
+        amount_out = quoter.functions.quoteExactInputSingle(
+            TOKEN_IN,
+            TOKEN_OUT,
+            FEE,
+            amount_in,
+            0
+        ).call()
 
-        token0 = pool.functions.token0().call()
-        token1 = pool.functions.token1().call()
-
-        # Precio raw V3
-        price_raw = (sqrtPriceX96 * sqrtPriceX96) / (2 ** 192)
-
-        # Decimals (IMPORTANTE)
-        decimals0 = 18
-        decimals1 = 18
-
-        # Ajuste real de decimales
-        price = price_raw * (10 ** (decimals0 - decimals1))
-
-        # Corrección de dirección del par
-        if token0.lower() != TOKEN_IN.lower():
-            price = 1 / price
-
+        price = amount_out / amount_in
         return price
 
     except Exception as e:
-        print("❌ PRICE ERROR:", repr(e))
+        print("❌ QUOTER ERROR:", repr(e))
         return None
 
 # =========================
@@ -165,12 +126,12 @@ def check_messages():
             text = msg.get("text", "")
 
             if text == "/start":
-                send_telegram("🤖 V3 Bot activo", chat_id)
+                send_telegram("🤖 Quoter V3 Bot activo", chat_id)
 
             elif text == "/precio":
                 price = get_price()
                 if price:
-                    send_telegram(f"💰 Precio V3: {price:.10f}", chat_id)
+                    send_telegram(f"💰 Swap price: {price:.8f}", chat_id)
                 else:
                     send_telegram("⚠️ Error precio", chat_id)
 
@@ -181,14 +142,14 @@ def check_messages():
         print("Telegram error:", e)
 
 # =========================
-# 🔁 BOT LOOP
+# 🔁 LOOP
 # =========================
 last_price = None
 
 def bot_loop():
     global last_price
 
-    print("🚀 V3 Bot iniciado")
+    print("🚀 Quoter V3 Bot iniciado")
 
     while True:
         try:
@@ -203,11 +164,11 @@ def bot_loop():
                 last_price = price
 
             if price >= last_price + STEP_UP:
-                send_telegram(f"🚀 SUBIÓ\n💰 {price}")
+                send_telegram(f"🚀 SUBIÓ SWAP PRICE\n💰 {price}")
                 last_price = price
 
             elif price <= last_price - STEP_DOWN:
-                send_telegram(f"📉 BAJÓ\n💰 {price}")
+                send_telegram(f"📉 BAJÓ SWAP PRICE\n💰 {price}")
                 last_price = price
 
             time.sleep(5)
