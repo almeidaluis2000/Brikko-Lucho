@@ -120,27 +120,24 @@ def detect_fee():
 # =========================
 def get_price():
     try:
-        fee = detect_fee()
+        print("🔥 TEST QUOTER")
 
-        if not fee:
-            return None
+        fee = 3000
 
-        amount_in = 10**18
-
-        amount_out = quoter.functions.quoteExactInputSingle(
+        result = quoter.functions.quoteExactInputSingle(
             TOKEN_IN,
             TOKEN_OUT,
             fee,
-            amount_in,
+            10**18,
             0
         ).call()
 
-        price = amount_out / amount_in
+        print("AMOUNT OUT:", result)
 
-        return price
+        return result / 10**18
 
     except Exception as e:
-        print("❌ PRICE ERROR:", repr(e))
+        print("❌ REAL ERROR:", repr(e))
         return None
 
 # =========================
