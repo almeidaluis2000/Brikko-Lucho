@@ -11,21 +11,13 @@ from web3 import Web3
 bsc = Web3(Web3.HTTPProvider("https://bsc-dataseed1.binance.org/"))
 
 # =========================
-# 🔥 POOL (GeckoTerminal)
+# 🔥 CONFIG
 # =========================
 POOL = Web3.to_checksum_address("0x7e4259eaac5ca2bc855c728e162d4d7782e52b7b")
-
-# TU TOKEN
 TOKEN = Web3.to_checksum_address("0xec9742f992ACc615C4252060D896c845ca8fC086")
 
-# =========================
-# ⚙️ CONFIG
-# =========================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
-
-STEP_UP = 0.1
-STEP_DOWN = 0.1
 
 # =========================
 # 🌐 FLASK
@@ -34,7 +26,7 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return "GeckoTerminal bot activo"
+    return "Bot Gecko FIX activo"
 
 def run_web():
     port = int(os.environ.get("PORT", 10000))
@@ -56,7 +48,7 @@ def send_telegram(msg, chat_id=CHAT_ID):
         print("Telegram error:", repr(e))
 
 # =========================
-# 📡 POOL ABI (Uniswap V2 style)
+# 📡 ABI POOL
 # =========================
 abi = [
     {
@@ -76,30 +68,38 @@ abi = [
         "inputs": [],
         "stateMutability": "view",
         "type": "function"
+    },
+    {
+        "name": "token1",
+        "outputs": [{"type": "address"}],
+        "inputs": [],
+        "stateMutability": "view",
+        "type": "function"
     }
 ]
 
 pool = bsc.eth.contract(address=POOL, abi=abi)
 
 # =========================
-# 💰 PRECIO REAL (GECKO STYLE)
+# 💰 PRECIO REAL CORRECTO
 # =========================
 def get_price():
     try:
-        reserves = pool.functions.getReserves().call()
+        r0, r1, _ = pool.functions.getReserves().call()
         token0 = pool.functions.token0().call()
-
-        r0 = reserves[0]
-        r1 = reserves[1]
+        token1 = pool.functions.token1().call()
 
         if r0 == 0 or r1 == 0:
             return None
 
-        # precio estilo AMM
+        # identificar dónde está tu token
         if token0.lower() == TOKEN.lower():
             price = r1 / r0
-        else:
+        elif token1.lower() == TOKEN.lower():
             price = r0 / r1
+        else:
+            print("❌ TOKEN NO ESTÁ EN ESTE POOL")
+            return None
 
         return price
 
@@ -137,43 +137,22 @@ def check_messages():
                 price = get_price()
 
                 if price:
-                    send_telegram(f"💰 PRECIO POOL REAL:\n${price:.6f}", chat_id)
+                    send_telegram(f"💰 PRECIO REAL POOL:\n${price:.6f}", chat_id)
                 else:
-                    send_telegram("❌ No hay liquidez en el pool", chat_id)
+                    send_telegram("❌ Sin liquidez o token no está en el pool", chat_id)
 
     except Exception as e:
         print("Telegram error:", repr(e))
 
 # =========================
-# 🔁 LOOP PRINCIPAL
+# 🔁 LOOP
 # =========================
-last_price = None
-
 def bot_loop():
-    global last_price
-
-    print("🚀 Bot GeckoTerminal iniciado")
+    print("🚀 Bot Gecko FIXED iniciado")
 
     while True:
         try:
             check_messages()
-
-            price = get_price()
-            if price is None:
-                time.sleep(5)
-                continue
-
-            if last_price is None:
-                last_price = price
-
-            if price >= last_price + STEP_UP:
-                send_telegram(f"🚀 SUBIÓ\n💰 ${price}")
-                last_price = price
-
-            elif price <= last_price - STEP_DOWN:
-                send_telegram(f"📉 BAJÓ\n💰 ${price}")
-                last_price = price
-
             time.sleep(5)
 
         except Exception as e:
