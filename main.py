@@ -6,7 +6,7 @@ from flask import Flask
 from web3 import Web3
 
 # =========================
-# 🔗 RPC BSC
+# 🔗 RPC
 # =========================
 bsc = Web3(Web3.HTTPProvider("https://bsc-dataseed1.binance.org/"))
 
@@ -14,12 +14,9 @@ bsc = Web3(Web3.HTTPProvider("https://bsc-dataseed1.binance.org/"))
 # 🔥 CONFIG
 # =========================
 TOKEN_IN = Web3.to_checksum_address("0xec9742f992ACc615C4252060D896c845ca8fC086")
-TOKEN_OUT = Web3.to_checksum_address("0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c")  # WBNB
+TOKEN_OUT = Web3.to_checksum_address("0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c")
 
-# PancakeSwap V3 Quoter (BSC)
-QUOTER = Web3.to_checksum_address("0x7e4259eaac5ca2bc855c728e162d4d7782e52b7b")
-
-FEE = 3000  # 0.3% (ajusta si tu pool es otro: 500 / 3000 / 10000)
+QUOTER = Web3.to_checksum_address("0x78D78E420Da98ad378D7799bE8f4AF69033EB077")
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
@@ -34,14 +31,14 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return "Quoter V3 Bot activo"
+    return "V3 AutoFee Bot activo"
 
 def run_web():
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
 
 # =========================
-# 🌐 HTTP SESSION
+# 🌐 SESSION
 # =========================
 session = requests.Session()
 
@@ -56,7 +53,7 @@ def send_telegram(msg, chat_id=CHAT_ID):
             timeout=10
         )
     except Exception as e:
-        print("Telegram error:", e)
+        print("Telegram error:", repr(e))
 
 # =========================
 # 📡 QUOTER ABI
@@ -67,40 +64,87 @@ quoter_abi = [
         "type": "function",
         "stateMutability": "view",
         "inputs": [
-            {"name": "tokenIn", "type": "address"},
-            {"name": "tokenOut", "type": "address"},
-            {"name": "fee", "type": "uint24"},
-            {"name": "amountIn", "type": "uint256"},
-            {"name": "sqrtPriceLimitX96", "type": "uint160"}
+            {"type": "address"},
+            {"type": "address"},
+            {"type": "uint24"},
+            {"type": "uint256"},
+            {"type": "uint160"}
         ],
-        "outputs": [{"name": "amountOut", "type": "uint256"}]
+        "outputs": [{"type": "uint256"}]
     }
 ]
 
 quoter = bsc.eth.contract(address=QUOTER, abi=quoter_abi)
 
 # =========================
-# 💰 REAL SWAP PRICE (QUOTER)
+# 💥 AUTO FEE DETECTION (CLAVE)
 # =========================
-def get_price(amount_in=10**18):
+FEE_CACHE = None
+
+FEES = [500, 3000, 10000]
+
+def detect_fee():
+    global FEE_CACHE
+
+    if FEE_CACHE:
+        return FEE_CACHE
+
+    amount_in = 10**18  # 1 token base
+
+    print("🔍 Detectando fee V3...")
+
+    for fee in FEES:
+        try:
+            out = quoter.functions.quoteExactInputSingle(
+                TOKEN_IN,
+                TOKEN_OUT,
+                fee,
+                amount_in,
+                0
+            ).call()
+
+            if out > 0:
+                FEE_CACHE = fee
+                print(f"✅ Fee detectado: {fee}")
+                return fee
+
+        except Exception as e:
+            print(f"❌ fee {fee} failed:", repr(e))
+            continue
+
+    print("❌ No se pudo detectar fee")
+    return None
+
+# =========================
+# 💰 PRECIO REAL SWAP V3
+# =========================
+def get_price():
     try:
+        fee = detect_fee()
+
+        if not fee:
+            return None
+
+        amount_in = 10**18
+
         amount_out = quoter.functions.quoteExactInputSingle(
             TOKEN_IN,
             TOKEN_OUT,
-            FEE,
+            fee,
             amount_in,
             0
         ).call()
 
         price = amount_out / amount_in
+
         return price
 
     except Exception as e:
-        print("❌ QUOTER ERROR:", repr(e))
+        print("❌ PRICE ERROR:", repr(e))
         return None
 
 # =========================
-# 🤖 TELEGRAM COMMANDS
+# 🤖 TELEGRAM LOOP
 # =========================
 last_update_id = 0
 
@@ -126,30 +170,30 @@ def check_messages():
             text = msg.get("text", "")
 
             if text == "/start":
-                send_telegram("🤖 Quoter V3 Bot activo", chat_id)
+                send_telegram("🤖 V3 AutoFee Bot activo", chat_id)
 
             elif text == "/precio":
                 price = get_price()
                 if price:
-                    send_telegram(f"💰 Swap price: {price:.8f}", chat_id)
+                    send_telegram(f"💰 Swap V3: {price:.8f}\n🔥 Fee: {FEE_CACHE}", chat_id)
                 else:
-                    send_telegram("⚠️ Error precio", chat_id)
+                    send_telegram("❌ Error obteniendo precio", chat_id)
 
             elif text == "/status":
-                send_telegram("✅ OK", chat_id)
+                send_telegram("✅ Bot OK", chat_id)
 
     except Exception as e:
-        print("Telegram error:", e)
+        print("Telegram error:", repr(e))
 
 # =========================
-# 🔁 LOOP
+# 🔁 LOOP PRINCIPAL
 # =========================
 last_price = None
 
 def bot_loop():
     global last_price
 
-    print("🚀 Quoter V3 Bot iniciado")
+    print("🚀 V3 AutoFee Bot iniciado")
 
     while True:
         try:
@@ -164,17 +208,17 @@ def bot_loop():
                 last_price = price
 
             if price >= last_price + STEP_UP:
-                send_telegram(f"🚀 SUBIÓ SWAP PRICE\n💰 {price}")
+                send_telegram(f"🚀 SUBIÓ\n💰 {price}")
                 last_price = price
 
             elif price <= last_price - STEP_DOWN:
-                send_telegram(f"📉 BAJÓ SWAP PRICE\n💰 {price}")
+                send_telegram(f"📉 BAJÓ\n💰 {price}")
                 last_price = price
 
             time.sleep(5)
 
         except Exception as e:
-            print("Loop error:", e)
+            print("Loop error:", repr(e))
             time.sleep(10)
 
 # =========================
