@@ -5,39 +5,33 @@ import requests
 from flask import Flask
 from web3 import Web3
 
-bsc = Web3(Web3.HTTPProvider("https://bsc-dataseed1.binance.org/"))
+# =========================
+# CONFIG
+# =========================
+POOL = "0x7e4259eaac5ca2bc855c728e162d4d7782e52b7b"
+TOKEN = "0xec9742f992ACc615C4252060D896c845ca8fC086"
 
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
+
+session = requests.Session()
+
+# =========================
+# FLASK
+# =========================
 app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return "Bot activo"
+    return "Hybrid bot activo"
 
-session = requests.Session()
+def run_web():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
 
-def safe_get_env(name):
-    value = os.getenv(name)
-    if not value:
-        print(f"❌ FALTA VARIABLE: {name}")
-    return value
-
-BOT_TOKEN = safe_get_env("BOT_TOKEN")
-CHAT_ID = safe_get_env("CHAT_ID")
-
-POOL = Web3.to_checksum_address("0x7E4259eAAc5CA2Bc855C728e162d4d7782E52b7B")
-
-abi = [
-    {
-        "name": "slot0",
-        "outputs": [{"type": "uint160"}],
-        "inputs": [],
-        "stateMutability": "view",
-        "type": "function"
-    }
-]
-
-pool = bsc.eth.contract(address=POOL, abi=abi)
-
+# =========================
+# TELEGRAM
+# =========================
 def send(msg):
     if not BOT_TOKEN or not CHAT_ID:
         print("❌ Telegram no configurado")
@@ -52,34 +46,142 @@ def send(msg):
     except Exception as e:
         print("Telegram error:", repr(e))
 
-def get_price():
+# =========================
+# 🟢 1. GECKOTERMINAL (PRINCIPAL)
+# =========================
+def price_gecko():
     try:
-        slot0 = pool.functions.slot0().call()
-        sqrtPriceX96 = slot0[0]
-        return (sqrtPriceX96 ** 2) / (2 ** 192)
+        url = f"https://api.geckoterminal.com/api/v2/networks/bsc/pools/{POOL}"
+        r = session.get(url, timeout=10).json()
+
+        price = r["data"]["attributes"]["base_token_price_usd"]
+        return float(price)
+
     except Exception as e:
-        print("Price error:", repr(e))
+        print("GECKO FAIL:", repr(e))
         return None
 
-def bot():
-    print("🚀 Bot iniciado correctamente")
+# =========================
+# 🟡 2. WEB3 FALLBACK (V2 SIMPLE)
+# =========================
+bsc = Web3(Web3.HTTPProvider("https://bsc-dataseed1.binance.org/"))
+
+def price_web3():
+    try:
+        abi = [
+            {
+                "name": "getReserves",
+                "outputs": [{"type": "uint112"}, {"type": "uint112"}, {"type": "uint32"}],
+                "inputs": [],
+                "stateMutability": "view",
+                "type": "function"
+            }
+        ]
+
+        contract = bsc.eth.contract(address=POOL, abi=abi)
+        r0, r1, _ = contract.functions.getReserves().call()
+
+        if r0 == 0 or r1 == 0:
+            return None
+
+        return r1 / r0
+
+    except Exception as e:
+        print("WEB3 FAIL:", repr(e))
+        return None
+
+# =========================
+# 💰 PRICE ENGINE (HÍBRIDO)
+# =========================
+def get_price():
+    price = price_gecko()
+
+    if price:
+        return price
+
+    # fallback
+    price = price_web3()
+
+    return price
+
+# =========================
+# 🤖 TELEGRAM LOOP
+# =========================
+last_price = None
+last_update_id = 0
+
+def check_messages():
+    global last_update_id
+
+    try:
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates?timeout=10"
+
+        if last_update_id:
+            url += f"&offset={last_update_id + 1}"
+
+        data = session.get(url, timeout=15).json()
+
+        for update in data.get("result", []):
+            last_update_id = update["update_id"]
+
+            msg = update.get("message")
+            if not msg:
+                continue
+
+            chat_id = msg["chat"]["id"]
+            text = msg.get("text", "")
+
+            if text == "/precio":
+                price = get_price()
+
+                if price:
+                    send(f"💰 PRECIO REAL:\n${price:.6f}")
+                else:
+                    send("⚠️ No se pudo obtener precio")
+
+            elif text == "/status":
+                send("✅ Bot híbrido funcionando")
+
+    except Exception as e:
+        print("Telegram error:", repr(e))
+
+# =========================
+# 🔁 LOOP PRINCIPAL
+# =========================
+def bot_loop():
+    global last_price
+
+    print("🚀 Hybrid bot definitivo iniciado")
 
     while True:
-        price = get_price()
+        try:
+            check_messages()
 
-        if price:
-            print("💰", price)
-        else:
-            print("❌ sin precio")
+            price = get_price()
 
-        time.sleep(10)
+            if price is None:
+                time.sleep(5)
+                continue
 
-def start():
-    try:
-        threading.Thread(target=bot, daemon=True).start()
-        app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
-    except Exception as e:
-        print("🔥 FATAL ERROR:", repr(e))
+            if last_price is None:
+                last_price = price
 
-if __name__ == "__main__":
-    start()
+            if price > last_price * 1.001:
+                send(f"🚀 SUBIÓ\n💰 ${price}")
+                last_price = price
+
+            elif price < last_price * 0.999:
+                send(f"📉 BAJÓ\n💰 ${price}")
+                last_price = price
+
+            time.sleep(5)
+
+        except Exception as e:
+            print("Loop error:", repr(e))
+            time.sleep(10)
+
+# =========================
+# START
+# =========================
+threading.Thread(target=bot_loop, daemon=True).start()
+run_web()
