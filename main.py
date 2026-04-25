@@ -3,7 +3,6 @@ import time
 import threading
 import requests
 from flask import Flask
-from web3 import Web3
 
 # =========================
 # CONFIG
@@ -13,6 +12,10 @@ POOL = "0x7e4259eaac5ca2bc855c728e162d4d7782e52b7b"
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 session = requests.Session()
+
+# cache
+last_valid_price = None
+last_price = None
 
 # =========================
 # FLASK
@@ -41,25 +44,27 @@ def send(msg, chat_id):
         print("Telegram error:", repr(e))
 
 # =========================
-# 🟢 GECKO (PRINCIPAL)
+# 🟢 GECKO (CON CACHE)
 # =========================
-def price_gecko():
+def get_price():
+    global last_valid_price
+
     try:
         url = f"https://api.geckoterminal.com/api/v2/networks/bsc/pools/{POOL}"
         r = session.get(url, timeout=10).json()
 
-        price = r["data"]["attributes"]["base_token_price_usd"]
-        return float(price)
+        price = float(r["data"]["attributes"]["base_token_price_usd"])
+
+        last_valid_price = price
+        return price
 
     except Exception as e:
         print("GECKO FAIL:", repr(e))
-        return None
 
-# =========================
-# 💰 PRICE ENGINE
-# =========================
-def get_price():
-    return price_gecko()
+        if last_valid_price:
+            return last_valid_price
+
+        return None
 
 # =========================
 # 🤖 TELEGRAM LOOP
@@ -91,7 +96,7 @@ def check_messages():
             # COMANDOS
             # =========================
             if text == "/start":
-                send("🤖 Bot activo\n\nUsa:\n/precio\n/status", chat_id)
+                send("🤖 Bot activo\n\nComandos:\n/precio\n/status", chat_id)
 
             elif text == "/status":
                 send("✅ Bot funcionando correctamente", chat_id)
@@ -102,7 +107,7 @@ def check_messages():
                 if price:
                     send(f"💰 PRECIO ACTUAL:\n${price:.6f}", chat_id)
                 else:
-                    send("⚠️ No se pudo obtener precio", chat_id)
+                    send("⚠️ Precio temporalmente no disponible", chat_id)
 
             else:
                 send("❓ Comando no reconocido", chat_id)
@@ -111,12 +116,12 @@ def check_messages():
         print("Telegram error:", repr(e))
 
 # =========================
-# LOOP
+# 🔁 LOOP PRINCIPAL (SIN DUPLICADOS)
 # =========================
 def bot_loop():
     global last_price
 
-    print("🚀 Bot final sin duplicados iniciado")
+    print("🚀 Bot definitivo iniciado")
 
     while True:
         try:
@@ -133,13 +138,13 @@ def bot_loop():
                 time.sleep(5)
                 continue
 
-            # 🔥 SOLO ALERTAS REALES (no spam)
+            # 🔥 ALERTAS SOLO SI CAMBIO REAL (1%)
             if price > last_price * 1.01:
-                send(f"🚀 SUBIÓ\n💰 ${price:.6f}", CHAT_ID)
+                print("🚀 SUBIÓ:", price)
                 last_price = price
 
             elif price < last_price * 0.99:
-                send(f"📉 BAJÓ\n💰 ${price:.6f}", CHAT_ID)
+                print("📉 BAJÓ:", price)
                 last_price = price
 
             time.sleep(5)
