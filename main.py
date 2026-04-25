@@ -6,15 +6,32 @@ from flask import Flask
 from web3 import Web3
 
 # =========================
-# 🔗 BSC CONNECTION
+# 🔗 RPC BSC (fallback)
 # =========================
-bsc = Web3(Web3.HTTPProvider("https://bsc-dataseed1.binance.org/"))
+RPCS = [
+    "https://bsc-dataseed1.binance.org/",
+    "https://bsc-dataseed2.defibit.io/",
+    "https://bsc-dataseed3.defibit.io/"
+]
+
+bsc = None
+for rpc in RPCS:
+    w3 = Web3(Web3.HTTPProvider(rpc))
+    if w3.is_connected():
+        bsc = w3
+        print("✅ RPC conectado:", rpc)
+        break
+
+if not bsc:
+    raise Exception("No RPC available")
 
 # =========================
 # 🔥 CONFIG
 # =========================
-TOKEN = Web3.to_checksum_address("0xec9742f992ACc615C4252060D896c845ca8fC086")
-PAIR = Web3.to_checksum_address("0x7e4259eaac5ca2bc855c728e162d4d7782e52b7b")
+TOKEN_IN = Web3.to_checksum_address("0xec9742f992ACc615C4252060D896c845ca8fC086")
+TOKEN_OUT = Web3.to_checksum_address("0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c")  # WBNB ejemplo
+
+POOL = Web3.to_checksum_address("0x7e4259eaac5ca2bc855c728e162d4d7782e52b7b")
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
@@ -23,49 +40,50 @@ STEP_UP = 0.1
 STEP_DOWN = 0.1
 
 # =========================
-# 🌐 FLASK APP
+# 🌐 FLASK
 # =========================
 app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return "Bot activo"
+    return "V3 Bot activo"
 
 def run_web():
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
 
 # =========================
-# 🌐 HTTP SESSION (OPTIMIZED)
+# 🌐 HTTP SESSION
 # =========================
 session = requests.Session()
 
 # =========================
-# 📡 ERC20 ABI (DECIMALS)
+# 📲 TELEGRAM
 # =========================
-erc20_abi = [
-    {
-        "name": "decimals",
-        "outputs": [{"type": "uint8"}],
-        "inputs": [],
-        "stateMutability": "view",
-        "type": "function"
-    }
-]
-
-token_contract = bsc.eth.contract(address=TOKEN, abi=erc20_abi)
-token_decimals = token_contract.functions.decimals().call()
+def send_telegram(msg, chat_id=CHAT_ID):
+    try:
+        session.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+            data={"chat_id": chat_id, "text": msg},
+            timeout=10
+        )
+    except Exception as e:
+        print("Telegram error:", e)
 
 # =========================
-# 🔥 PAIR ABI
+# 📡 V3 POOL ABI (slot0)
 # =========================
-pair_abi = [
+pool_abi = [
     {
-        "name": "getReserves",
+        "name": "slot0",
         "outputs": [
-            {"type": "uint112"},
-            {"type": "uint112"},
-            {"type": "uint32"}
+            {"type": "uint160"},
+            {"type": "int24"},
+            {"type": "uint16"},
+            {"type": "uint16"},
+            {"type": "uint16"},
+            {"type": "uint8"},
+            {"type": "bool"}
         ],
         "inputs": [],
         "stateMutability": "view",
@@ -87,43 +105,30 @@ pair_abi = [
     }
 ]
 
-pair = bsc.eth.contract(address=PAIR, abi=pair_abi)
+pool = bsc.eth.contract(address=POOL, abi=pool_abi)
 
 # =========================
-# 📲 TELEGRAM
-# =========================
-def send_telegram(msg, chat_id=CHAT_ID):
-    try:
-        session.post(
-            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-            data={"chat_id": chat_id, "text": msg},
-            timeout=10
-        )
-    except Exception as e:
-        print("Telegram error:", e)
-
-# =========================
-# 💰 PRICE FUNCTION (CORRECTED)
+# 💰 PRICE V3 (CORRECTO)
 # =========================
 def get_price():
     try:
-        reserves = pair.functions.getReserves().call()
-        token0 = pair.functions.token0().call()
-        token1 = pair.functions.token1().call()
+        slot0 = pool.functions.slot0().call()
+        sqrtPriceX96 = slot0[0]
 
-        reserve0 = reserves[0]
-        reserve1 = reserves[1]
+        token0 = pool.functions.token0().call()
+        token1 = pool.functions.token1().call()
 
-        # normalización con decimals
-        if token0.lower() == TOKEN.lower():
-            price = (reserve1 / 1e18) / (reserve0 / 10**token_decimals)
-        else:
-            price = (reserve0 / 1e18) / (reserve1 / 10**token_decimals)
+        # precio base V3
+        price = (sqrtPriceX96 ** 2) / 2**192
+
+        # ajuste dirección token
+        if token0.lower() != TOKEN_IN.lower():
+            price = 1 / price
 
         return price
 
     except Exception as e:
-        print("Price error:", e)
+        print("❌ V3 price error:", repr(e))
         return None
 
 # =========================
@@ -140,46 +145,43 @@ def check_messages():
         if last_update_id:
             url += f"&offset={last_update_id + 1}"
 
-        response = session.get(url, timeout=15).json()
+        data = session.get(url, timeout=15).json()
 
-        for update in response.get("result", []):
+        for update in data.get("result", []):
             last_update_id = update["update_id"]
 
-            message = update.get("message")
-            if not message:
+            msg = update.get("message")
+            if not msg:
                 continue
 
-            chat_id = message["chat"]["id"]
-            text = message.get("text", "")
+            chat_id = msg["chat"]["id"]
+            text = msg.get("text", "")
 
             if text == "/start":
-                send_telegram("🤖 Bot activo (precio real pool)", chat_id)
+                send_telegram("🤖 V3 Bot activo", chat_id)
 
             elif text == "/precio":
                 price = get_price()
                 if price:
-                    send_telegram(f"💰 Precio: {price:.8f}", chat_id)
+                    send_telegram(f"💰 Precio V3: {price:.10f}", chat_id)
                 else:
                     send_telegram("⚠️ Error precio", chat_id)
 
             elif text == "/status":
-                send_telegram("✅ Bot OK", chat_id)
-
-            else:
-                send_telegram("❓ Comando inválido", chat_id)
+                send_telegram("✅ OK", chat_id)
 
     except Exception as e:
-        print("Telegram loop error:", e)
+        print("Telegram error:", e)
 
 # =========================
-# 🔁 MAIN LOOP
+# 🔁 BOT LOOP
 # =========================
 last_price = None
 
 def bot_loop():
     global last_price
 
-    print("🚀 Bot iniciado")
+    print("🚀 V3 Bot iniciado")
 
     while True:
         try:
