@@ -9,10 +9,8 @@ from web3 import Web3
 # CONFIG
 # =========================
 POOL = "0x7e4259eaac5ca2bc855c728e162d4d7782e52b7b"
-TOKEN = "0xec9742f992ACc615C4252060D896c845ca8fC086"
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
 
 session = requests.Session()
 
@@ -32,22 +30,18 @@ def run_web():
 # =========================
 # TELEGRAM
 # =========================
-def send(msg):
-    if not BOT_TOKEN or not CHAT_ID:
-        print("❌ Telegram no configurado")
-        return
-
+def send(msg, chat_id):
     try:
         session.post(
             f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-            data={"chat_id": CHAT_ID, "text": msg},
+            data={"chat_id": chat_id, "text": msg},
             timeout=10
         )
     except Exception as e:
         print("Telegram error:", repr(e))
 
 # =========================
-# 🟢 1. GECKOTERMINAL (PRINCIPAL)
+# 🟢 GECKO (PRINCIPAL)
 # =========================
 def price_gecko():
     try:
@@ -62,52 +56,14 @@ def price_gecko():
         return None
 
 # =========================
-# 🟡 2. WEB3 FALLBACK (V2 SIMPLE)
-# =========================
-bsc = Web3(Web3.HTTPProvider("https://bsc-dataseed1.binance.org/"))
-
-def price_web3():
-    try:
-        abi = [
-            {
-                "name": "getReserves",
-                "outputs": [{"type": "uint112"}, {"type": "uint112"}, {"type": "uint32"}],
-                "inputs": [],
-                "stateMutability": "view",
-                "type": "function"
-            }
-        ]
-
-        contract = bsc.eth.contract(address=POOL, abi=abi)
-        r0, r1, _ = contract.functions.getReserves().call()
-
-        if r0 == 0 or r1 == 0:
-            return None
-
-        return r1 / r0
-
-    except Exception as e:
-        print("WEB3 FAIL:", repr(e))
-        return None
-
-# =========================
-# 💰 PRICE ENGINE (HÍBRIDO)
+# 💰 PRICE ENGINE
 # =========================
 def get_price():
-    price = price_gecko()
-
-    if price:
-        return price
-
-    # fallback
-    price = price_web3()
-
-    return price
+    return price_gecko()
 
 # =========================
 # 🤖 TELEGRAM LOOP
 # =========================
-last_price = None
 last_update_id = 0
 
 def check_messages():
@@ -129,52 +85,41 @@ def check_messages():
                 continue
 
             chat_id = msg["chat"]["id"]
-            text = msg.get("text", "")
+            text = msg.get("text", "").lower()
 
-            if text == "/precio":
+            # =========================
+            # COMANDOS
+            # =========================
+            if text == "/start":
+                send("🤖 Bot activo\n\nUsa:\n/precio\n/status", chat_id)
+
+            elif text == "/status":
+                send("✅ Bot funcionando correctamente", chat_id)
+
+            elif text == "/precio":
                 price = get_price()
 
                 if price:
-                    send(f"💰 PRECIO REAL:\n${price:.6f}")
+                    send(f"💰 PRECIO ACTUAL:\n${price:.6f}", chat_id)
                 else:
-                    send("⚠️ No se pudo obtener precio")
+                    send("⚠️ No se pudo obtener precio", chat_id)
 
-            elif text == "/status":
-                send("✅ Bot híbrido funcionando")
+            else:
+                send("❓ Comando no reconocido", chat_id)
 
     except Exception as e:
         print("Telegram error:", repr(e))
 
 # =========================
-# 🔁 LOOP PRINCIPAL
+# LOOP
 # =========================
 def bot_loop():
-    global last_price
-
-    print("🚀 Hybrid bot definitivo iniciado")
+    print("🚀 Bot final iniciado")
 
     while True:
         try:
             check_messages()
-
-            price = get_price()
-
-            if price is None:
-                time.sleep(5)
-                continue
-
-            if last_price is None:
-                last_price = price
-
-            if price > last_price * 1.001:
-                send(f"🚀 SUBIÓ\n💰 ${price}")
-                last_price = price
-
-            elif price < last_price * 0.999:
-                send(f"📉 BAJÓ\n💰 ${price}")
-                last_price = price
-
-            time.sleep(5)
+            time.sleep(3)
 
         except Exception as e:
             print("Loop error:", repr(e))
