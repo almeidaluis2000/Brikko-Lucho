@@ -114,12 +114,35 @@ def check_messages():
 # LOOP
 # =========================
 def bot_loop():
-    print("🚀 Bot final iniciado")
+    global last_price
+
+    print("🚀 Bot final sin duplicados iniciado")
 
     while True:
         try:
             check_messages()
-            time.sleep(3)
+
+            price = get_price()
+
+            if price is None:
+                time.sleep(5)
+                continue
+
+            if last_price is None:
+                last_price = price
+                time.sleep(5)
+                continue
+
+            # 🔥 SOLO ALERTAS REALES (no spam)
+            if price > last_price * 1.01:
+                send(f"🚀 SUBIÓ\n💰 ${price:.6f}", CHAT_ID)
+                last_price = price
+
+            elif price < last_price * 0.99:
+                send(f"📉 BAJÓ\n💰 ${price:.6f}", CHAT_ID)
+                last_price = price
+
+            time.sleep(5)
 
         except Exception as e:
             print("Loop error:", repr(e))
