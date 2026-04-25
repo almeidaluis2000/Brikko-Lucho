@@ -118,17 +118,24 @@ def get_price():
         token0 = pool.functions.token0().call()
         token1 = pool.functions.token1().call()
 
-        # precio base V3
-        price = (sqrtPriceX96 ** 2) / 2**192
+        # Precio raw V3
+        price_raw = (sqrtPriceX96 * sqrtPriceX96) / (2 ** 192)
 
-        # ajuste dirección token
+        # Decimals (IMPORTANTE)
+        decimals0 = 18
+        decimals1 = 18
+
+        # Ajuste real de decimales
+        price = price_raw * (10 ** (decimals0 - decimals1))
+
+        # Corrección de dirección del par
         if token0.lower() != TOKEN_IN.lower():
             price = 1 / price
 
         return price
 
     except Exception as e:
-        print("❌ V3 price error:", repr(e))
+        print("❌ PRICE ERROR:", repr(e))
         return None
 
 # =========================
