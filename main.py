@@ -119,12 +119,10 @@ def detect_fee():
 # 💰 PRECIO REAL SWAP V3
 # =========================
 def get_price():
+    # 1. intentar V3
     try:
-        print("🔥 TEST QUOTER")
-
         fee = 3000
-
-        result = quoter.functions.quoteExactInputSingle(
+        out = quoter.functions.quoteExactInputSingle(
             TOKEN_IN,
             TOKEN_OUT,
             fee,
@@ -132,12 +130,18 @@ def get_price():
             0
         ).call()
 
-        print("AMOUNT OUT:", result)
+        return out / 10**18
 
-        return result / 10**18
+    except:
+        pass
 
-    except Exception as e:
-        print("❌ REAL ERROR:", repr(e))
+    # 2. fallback DexScreener
+    try:
+        url = f"https://api.dexscreener.com/latest/dex/pairs/bsc/{PAIR}"
+        data = session.get(url).json()
+        return float(data["pair"]["priceUsd"])
+
+    except:
         return None
 
 # =========================
