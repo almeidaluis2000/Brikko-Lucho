@@ -6,21 +6,26 @@ from flask import Flask
 from web3 import Web3
 
 # =========================
-# 🔗 BSC
+# 🔗 BSC RPC
 # =========================
 bsc = Web3(Web3.HTTPProvider("https://bsc-dataseed1.binance.org/"))
 
 # =========================
-# 🔥 TOKENS
+# 🔥 POOL (GeckoTerminal)
 # =========================
-TOKEN_IN = Web3.to_checksum_address("0xec9742f992ACc615C4252060D896c845ca8fC086")
-TOKEN_OUT = Web3.to_checksum_address("0x55d398326f99059fF775485246999027B3197955")
+POOL = Web3.to_checksum_address("0x7e4259eaac5ca2bc855c728e162d4d7782e52b7b")
 
-# PancakeSwap V3 Router (NO QUOTER)
-ROUTER = Web3.to_checksum_address("0x10ED43C718714eb63d5aA57B78B54704E256024E")
+# TU TOKEN
+TOKEN = Web3.to_checksum_address("0xec9742f992ACc615C4252060D896c845ca8fC086")
 
+# =========================
+# ⚙️ CONFIG
+# =========================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
+
+STEP_UP = 0.1
+STEP_DOWN = 0.1
 
 # =========================
 # 🌐 FLASK
@@ -29,7 +34,7 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return "Router bot activo"
+    return "GeckoTerminal bot activo"
 
 def run_web():
     port = int(os.environ.get("PORT", 10000))
@@ -51,42 +56,55 @@ def send_telegram(msg, chat_id=CHAT_ID):
         print("Telegram error:", repr(e))
 
 # =========================
-# 📡 ABI MINIMAL ROUTER
+# 📡 POOL ABI (Uniswap V2 style)
 # =========================
-router_abi = [
+abi = [
     {
-        "name": "getAmountsOut",
-        "type": "function",
-        "stateMutability": "view",
-        "inputs": [
-            {"type": "uint256"},
-            {"type": "address[]"}
+        "name": "getReserves",
+        "outputs": [
+            {"type": "uint112"},
+            {"type": "uint112"},
+            {"type": "uint32"}
         ],
-        "outputs": [{"type": "uint256[]"}]
+        "inputs": [],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "name": "token0",
+        "outputs": [{"type": "address"}],
+        "inputs": [],
+        "stateMutability": "view",
+        "type": "function"
     }
 ]
 
-router = bsc.eth.contract(address=ROUTER, abi=router_abi)
+pool = bsc.eth.contract(address=POOL, abi=abi)
 
 # =========================
-# 💰 PRECIO REAL (MULTI-HOP REAL)
+# 💰 PRECIO REAL (GECKO STYLE)
 # =========================
 def get_price():
     try:
-        amount_in = 10**18
+        reserves = pool.functions.getReserves().call()
+        token0 = pool.functions.token0().call()
 
-        path = [
-            TOKEN_IN,
-            TOKEN_OUT
-        ]
+        r0 = reserves[0]
+        r1 = reserves[1]
 
-        amounts = router.functions.getAmountsOut(amount_in, path).call()
+        if r0 == 0 or r1 == 0:
+            return None
 
-        price = amounts[-1] / amount_in
+        # precio estilo AMM
+        if token0.lower() == TOKEN.lower():
+            price = r1 / r0
+        else:
+            price = r0 / r1
+
         return price
 
     except Exception as e:
-        print("❌ ROUTE ERROR:", repr(e))
+        print("❌ POOL ERROR:", repr(e))
         return None
 
 # =========================
@@ -119,22 +137,43 @@ def check_messages():
                 price = get_price()
 
                 if price:
-                    send_telegram(f"💰 PRECIO REAL (ROUTER):\n{price:.6f} USDT", chat_id)
+                    send_telegram(f"💰 PRECIO POOL REAL:\n${price:.6f}", chat_id)
                 else:
-                    send_telegram("❌ No hay ruta disponible", chat_id)
+                    send_telegram("❌ No hay liquidez en el pool", chat_id)
 
     except Exception as e:
         print("Telegram error:", repr(e))
 
 # =========================
-# 🔁 LOOP
+# 🔁 LOOP PRINCIPAL
 # =========================
+last_price = None
+
 def bot_loop():
-    print("🚀 Router bot iniciado")
+    global last_price
+
+    print("🚀 Bot GeckoTerminal iniciado")
 
     while True:
         try:
             check_messages()
+
+            price = get_price()
+            if price is None:
+                time.sleep(5)
+                continue
+
+            if last_price is None:
+                last_price = price
+
+            if price >= last_price + STEP_UP:
+                send_telegram(f"🚀 SUBIÓ\n💰 ${price}")
+                last_price = price
+
+            elif price <= last_price - STEP_DOWN:
+                send_telegram(f"📉 BAJÓ\n💰 ${price}")
+                last_price = price
+
             time.sleep(5)
 
         except Exception as e:
